@@ -315,8 +315,8 @@ def certificates():
             [[red, constraints.T], [constraints, csr_matrix((2, 2))]], format="csr"
         )
         rhs = np.r_[q.T @ res.ravel(), np.zeros(2)]
-        inv = spsolve(augmented, rhs)[:-2]
-        eta = float(np.sqrt(max(0, grid.h * np.dot(rhs[:-2], inv))))
+        solution = spsolve(augmented, rhs)
+        eta = float(np.sqrt(max(0, grid.h * np.dot(rhs[:-2], solution[:-2]))))
         bound = eta / (2 * np.sqrt(tau * (0.5 + tau)))
         actual = l2(a, exact, grid)
         erhs = q.T @ (a - exact).ravel()
@@ -334,13 +334,7 @@ def certificates():
                 "raw_l2_error": l2(u, exact, grid),
                 "mass_repair": float(np.linalg.norm(defect)),
                 "minimum": float(a.min()),
-                "inverse_residual": float(
-                    np.max(
-                        np.abs(
-                            augmented @ np.r_[inv, spsolve(augmented, rhs)[-2:]] - rhs
-                        )
-                    )
-                ),
+                "inverse_residual": float(np.max(np.abs(augmented @ solution - rhs))),
             }
         )
     write_rows(OUT / "certificates.csv", rows)

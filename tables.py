@@ -39,5 +39,13 @@ def export_table(number, source, output):
 
 
 if __name__ == "__main__":
+    output = BUILD / "archive"
+    reference = DATA.parent / "reference"
     for number, (source, _) in TABLES.items():
-        export_table(number, DATA / source, BUILD / "archive")
+        export_table(number, DATA / source, output)
+        name = f"table{number}.csv"
+        if (output / name).read_text(encoding="utf-8") != (reference / name).read_text(
+            encoding="utf-8"
+        ):
+            raise ValueError(f"Archived values do not match reference/{name}")
+    print("Archived Tables 1–4 match the reference CSV files")

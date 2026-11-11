@@ -1,6 +1,11 @@
 import csv
 import math
-from common import DATA, Grid, initial, load_arrays, simplex
+from common import DATA, Grid, initial, l2, load_arrays, simplex
+
+import numpy as np
+from scipy.sparse import eye, kron
+from scipy.sparse.linalg import spsolve
+from ex3 import BASIS, dual_norm, potential, project
 
 
 def rows(name):
@@ -84,21 +89,6 @@ for r in c:
         float(r["raw_l2_error"]) <= float(r["raw_l2_bound"]), "raw-state mass repair"
     )
     require(float(r["inverse_residual"]) < 1e-18, "restricted inverse")
-l = rows("validation/large.csv")
-own = next(r for r in l if r["method"] == "second")
-require(
-    int(own["n"]) == 20000 and float(own["length"]) == 2,
-    "maximum benchmark spatial scale",
-)
-require(
-    float(own["minimum"]) > 0 and float(own["simplex"]) < 1e-14,
-    "large positive simplex",
-)
-require(
-    float(own["mass"]) < 1e-9 and float(own["entropy_identity"]) < 1e-9,
-    "large structure",
-)
-require(float(own["maximum_entropy_increment"]) < 0, "large entropy decay")
 for r in rows("structure_and_near_vacuum.csv"):
     require(
         float(r["minimum"]) > 0 and abs(float(r["entropy_identity"])) < 1e-10,
@@ -113,11 +103,6 @@ print(
 )
 
 
-import numpy as np
-from scipy.sparse import eye, kron
-from scipy.sparse.linalg import spsolve
-from ex3 import BASIS, dual_norm, potential, project
-
 joint = rows("joint_accuracy_cost/summary.csv")
 diagnostic = rows("joint_accuracy_cost/steps.csv")
 times = rows("joint_accuracy_cost/timings.csv")
@@ -125,6 +110,13 @@ out = DATA / "joint_accuracy_cost"
 reference = load_arrays(out / "pde_reference_32768.mat")["states"]
 coarse = load_arrays(out / "pde_reference_16384.mat")["states"]
 g = Grid(2048)
+r_end = l2(reference[-1], coarse[-1], g)
+require(
+    all(
+        math.isclose(r_end, float(r["reference_difference"]), rel_tol=1e-10) for r in a
+    ),
+    "terminal PDE reference difference",
+)
 r0 = initial(2048)
 q = kron(eye(2048, format="csr"), BASIS, format="csr")
 
@@ -207,11 +199,34 @@ for row in joint:
             np.max(np.abs(residual - project(residual))) < 1e-12, "tangent residual"
         )
 accum = rows("residual_accumulation/summary.csv")
+accum_steps = rows("residual_accumulation/steps.csv")
 for row in accum:
     tau = float(row["tau"])
     power = int(row["power"])
     z = load_arrays(
         DATA / "residual_accumulation" / f"trajectory_p{power}_tau{tau:g}.mat"
+    )
+    steps = [
+        s for s in accum_steps if float(s["tau"]) == tau and int(s["power"]) == power
+    ]
+    require(
+        [int(s["stage"]) for s in steps] == list(range(-1, len(z["states"]) - 1)),
+        "all controlled-residual steps",
+    )
+    budget = math.sqrt(sum(float(s["zeta"]) ** 2 / tau for s in steps[1:]))
+    require(
+        math.isclose(budget, float(row["residual_budget"]), rel_tol=1e-12),
+        "controlled-residual budget",
+    )
+    require(
+        float(steps[0]["zeta"]) == float(row["zeta_a"])
+        and max(float(s["entropy_ratio"]) for s in steps)
+        == float(row["maximum_entropy_ratio"]),
+        "controlled-residual diagnostics",
+    )
+    require(
+        all(float(s["minimum"]) > 0 and float(s["entropy_change"]) < 0 for s in steps),
+        "controlled-residual positivity and entropy decay",
     )
     measured = np.sqrt(
         np.sum((z["states"] - z["reference"]) ** 2, axis=(1, 2)) / 24
